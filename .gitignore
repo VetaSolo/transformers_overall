@@ -1,0 +1,23 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+.env
+*.log
+
+# Large datasets / caches
+data/*
+!data/.gitkeep
+baseline_results.txt
+fine_tuned_results.txt
+comparison_results.txt
+error_analysis.txt
+baseline_model.pkl
+confusion_matrix_*.png
+fine_tuned_model/
+*.npy
