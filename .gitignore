@@ -10,14 +10,19 @@ Thumbs.db
 .env
 *.log
 
-# Large datasets / caches
+# Large raw data & embedding caches (metrics/artifacts below ARE tracked)
 data/*
 !data/.gitkeep
-baseline_results.txt
-fine_tuned_results.txt
-comparison_results.txt
-error_analysis.txt
-baseline_model.pkl
-confusion_matrix_*.png
-fine_tuned_model/
+!data/sample_assignment.csv
 *.npy
+
+# Model weights are large; keep locally after Day 5 (python -m src.finetune)
+fine_tuned_model/*.safetensors
+fine_tuned_model/*.bin
+# keep tokenizer/config if present
+!fine_tuned_model/config.json
+!fine_tuned_model/tokenizer*.json
+
+# Plots can be regenerated
+attention_layer*.png
+confusion_matrix_*.png

@@ -1,93 +1,94 @@
 # Sentiment Analysis с DistilBERT
 
-Проект на неделю: от токенизации до fine-tuning, сравнения моделей, анализа ошибок и демо.
+Недельный проект: токенизация → эмбеддинги → attention → baseline → fine-tuning → сравнение → анализ ошибок + демо.
 
-## Описание
+## Формат данных (как в задании)
 
-Бинарный sentiment analysis на **IMDB Dataset of 50K Movie Reviews** (используем **25%** подвыборку для ускорения обучения на CPU).
+CSV минимум с колонками:
 
-- **Baseline:** frozen DistilBERT CLS-эмбеддинги + LogisticRegression  
-- **Fine-tuned:** `DistilBERTForSequenceClassification` (3 эпохи)
+```csv
+text,label
+"This movie was absolutely amazing!",1
+"Terrible experience, would not recommend.",0
+```
+
+Также поддерживается IMDB Kaggle: `review,sentiment` (positive/negative).
+
+Положите файл в `data/dataset.csv` **или** `data/IMDB Dataset.csv`, либо передайте `--data path/to.csv`.
+
+Пример официального формата: `data/sample_assignment.csv`.
 
 ## Структура
 
 ```
-README.md
-├── requirements.txt
-├── app.py                    # Gradio демо
-├── data/                     # IMDB Dataset.csv
-├── fine_tuned_model/         # дообученная модель
-├── baseline_model.pkl
-├── baseline_results.txt
-├── fine_tuned_results.txt
-├── comparison_results.txt
-├── error_analysis.txt
-├── confusion_matrix_*.png
-├── src/
-│   ├── embeddings.py         # tokenize + CLS embeddings
-│   ├── baseline.py           # Day 4 baseline
-│   ├── dataset.py            # SentimentDataset
-│   ├── finetune.py           # Day 5 fine-tuning
-│   ├── predict.py            # inference helpers
-│   ├── compare.py            # Day 6 сравнение
-│   ├── error_analysis.py     # Day 7 анализ ошибок
-│   ├── main.py               # FastAPI: / и /predict
-│   ├── models.py
-│   └── utils.py              # heuristic fallback
-└── tests/
+app.py                      # Gradio демо (требует fine_tuned_model/)
+baseline_model.pkl          # Day 4 — сохраняется baseline.py
+baseline_results.txt
+fine_tuned_results.txt
+comparison_results.txt
+error_analysis.txt
+fine_tuned_model/           # Day 5
+data/
+  sample_assignment.csv     # text,label
+  IMDB Dataset.csv          # опционально
+src/
+  data_loading.py           # единый loader text/label (+ IMDB aliases)
+  embeddings.py             # Days 1–2 helpers
+  baseline.py               # Day 4 (+ сохраняет baseline_model.pkl)
+  dataset.py / finetune.py  # Day 5
+  predict.py / compare.py   # Day 6 (грузит baseline ТОЛЬКО из Day 4)
+  error_analysis.py         # Day 7
+  main.py                   # FastAPI на fine-tuned (без heuristic fallback)
+tests/
 ```
 
-## Быстрый старт
+## Запуск по дням
 
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
+
+# Day 4 — baseline (пишет baseline_results.txt + baseline_model.pkl)
+python -m src.baseline --data data/sample_assignment.csv
+# или на IMDB (25% по умолчанию):
+python -m src.baseline
+
+# Day 5 — fine-tuning
+python -m src.finetune
+
+# Day 6 — сравнение (нужны fine_tuned_model/ и baseline_model.pkl)
+python -m src.compare
+
+# Day 7 — ошибки
+python -m src.error_analysis
 ```
 
-## Пайплайн по дням
-
-```bash
-python -m src.baseline --max-samples 2000   # baseline (или полный кэш)
-python -m src.finetune                      # fine-tune на 25% IMDB
-python -m src.compare                       # сравнение + confusion matrices
-python -m src.error_analysis                # FP/FN анализ
-```
-
-## Запуск демо
+## Демо
 
 ### Gradio
-
 ```bash
-pip install gradio
 python app.py
 ```
-
-Откройте http://127.0.0.1:7860
+http://127.0.0.1:7860
 
 ### FastAPI
-
 ```bash
 uvicorn src.main:app --reload
 ```
+`GET /`, `POST /predict` — **только** fine-tuned модель (если её нет → HTTP 503, не stub).
 
-- `GET /` — healthcheck  
-- `POST /predict` — `{"text": "..."}` → `{"label": "positive"|"negative", "score": 0..1}`  
-- Docs: http://127.0.0.1:8000/docs
+## Результаты (текущий прогон на 25% IMDB)
 
-## Результаты
-
-### Fine-tuned модель
+### Fine-tuned
 - F1 (macro): **0.8636**
 - Accuracy: **0.8636**
 
-### Baseline модель
+### Baseline
 - F1 (macro): **0.8224**
 - Accuracy: **0.8224**
 
-**Улучшение F1: +5.01%**
-
-Подробности: `comparison_results.txt`, `error_analysis.txt`.
+Улучшение F1: **+5.01%**
 
 ## Использование в коде
 
@@ -99,14 +100,5 @@ model = AutoModelForSequenceClassification.from_pretrained("./fine_tuned_model")
 tokenizer = AutoTokenizer.from_pretrained("./fine_tuned_model")
 
 inputs = tokenizer("Your text here", return_tensors="pt", truncation=True, max_length=128)
-with torch.no_grad():
-    pred = torch.argmax(model(**inputs).logits, dim=1).item()
-# 0 = negative, 1 = positive
+pred = torch.argmax(model(**inputs).logits, dim=1).item()  # 0=neg, 1=pos
 ```
-
-## Требования
-
-- Python 3.8+
-- transformers, torch, scikit-learn, pandas
-- gradio (для демо)
-- fastapi, uvicorn (для API)

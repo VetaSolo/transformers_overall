@@ -1,37 +1,34 @@
 """
-Baseline без обучения трансформера
+Day 4 — Baseline without fine-tuning the transformer.
 
-Задача 1 — токенизация
-Задача 2 — CLS-эмбеддинги
-Задача 3 — Logistic Regression на эмбеддингах
+CLS embeddings (frozen DistilBERT) + LogisticRegression.
+Saves baseline_model.pkl for Day 6 comparison.
 """
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
+import joblib
 import numpy as np
-import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report, f1_score
 from sklearn.model_selection import train_test_split
 
+from src.data_loading import (
+    DEFAULT_FRACTION,
+    RANDOM_STATE,
+    load_sentiment_csv,
+    subsample_stratified,
+)
 from src.embeddings import get_cls_embeddings, tokenize_texts
 
 ROOT = Path(__file__).resolve().parents[1]
-DATA_PATH = ROOT / "data" / "IMDB Dataset.csv"
-EMBEDDINGS_CACHE = ROOT / "data" / "imdb_cls_embeddings.npy"
-LABELS_CACHE = ROOT / "data" / "imdb_labels.npy"
 RESULTS_PATH = ROOT / "baseline_results.txt"
-
-
-def load_imdb(path: Path = DATA_PATH) -> pd.DataFrame:
-    df = pd.read_csv(path)
-    if not {"review", "sentiment"}.issubset(df.columns):
-        raise ValueError(f"Expected columns review, sentiment. Got: {list(df.columns)}")
-    df = df.dropna(subset=["review", "sentiment"]).copy()
-    df["label"] = (df["sentiment"].str.lower() == "positive").astype(int)
-    return df
+BASELINE_PKL = ROOT / "baseline_model.pkl"
+EMBEDDINGS_CACHE = ROOT / "data" / "cls_embeddings.npy"
+LABELS_CACHE = ROOT / "data" / "cls_labels.npy"
 
 
 def demo_tokenization() -> None:
@@ -69,23 +66,29 @@ def demo_cls_embeddings() -> None:
     print()
 
 
-def run_baseline(max_samples: int | None = None, batch_size: int = 32) -> float:
+def run_baseline(
+    data_path: str | None = None,
+    max_samples: int | None = None,
+    fraction: float | None = DEFAULT_FRACTION,
+    batch_size: int = 32,
+) -> float:
     print("=" * 60)
     print("ЗАДАЧА 3: Logistic Regression на эмбеддингах")
     print("=" * 60)
 
-    df = load_imdb()
-    if max_samples is not None:
-        df = df.sample(n=max_samples, random_state=42).reset_index(drop=True)
-        print(f"Using subset: {len(df)} rows")
-    else:
-        print(f"Using full dataset: {len(df)} rows")
+    df = load_sentiment_csv(data_path)
+    source = df.attrs.get("source_path", data_path)
+    print(f"Loaded: {source} ({len(df)} rows)")
 
-    texts = df["review"].astype(str).tolist()
+    df = subsample_stratified(df, fraction=fraction, max_samples=max_samples)
+    print(f"Using: {len(df)} rows for baseline")
+
+    texts = df["text"].tolist()
     y = df["label"].to_numpy()
 
     cache_ok = (
         max_samples is None
+        and fraction == DEFAULT_FRACTION
         and EMBEDDINGS_CACHE.exists()
         and LABELS_CACHE.exists()
         and np.load(LABELS_CACHE).shape[0] == len(texts)
@@ -98,7 +101,7 @@ def run_baseline(max_samples: int | None = None, batch_size: int = 32) -> float:
     else:
         print(f"Extracting CLS embeddings (batch_size={batch_size})...")
         X = get_cls_embeddings(texts, batch_size=batch_size)
-        if max_samples is None:
+        if max_samples is None and fraction == DEFAULT_FRACTION:
             np.save(EMBEDDINGS_CACHE, X)
             np.save(LABELS_CACHE, y)
             print(f"Saved embeddings cache -> {EMBEDDINGS_CACHE}")
@@ -106,12 +109,16 @@ def run_baseline(max_samples: int | None = None, batch_size: int = 32) -> float:
     print(f"X shape: {X.shape}, y shape: {y.shape}")
 
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, stratify=y, random_state=42
+        X, y, test_size=0.2, stratify=y, random_state=RANDOM_STATE
     )
 
     clf = LogisticRegression(max_iter=1000, n_jobs=-1)
     clf.fit(X_train, y_train)
     y_pred = clf.predict(X_test)
+
+    # Day 6 must load THIS model — not retrain inside compare.py
+    joblib.dump(clf, BASELINE_PKL)
+    print(f"Saved baseline model -> {BASELINE_PKL}")
 
     report = classification_report(y_test, y_pred)
     f1 = f1_score(y_test, y_pred, average="macro")
@@ -121,10 +128,12 @@ def run_baseline(max_samples: int | None = None, batch_size: int = 32) -> float:
 
     RESULTS_PATH.write_text(
         "Baseline: DistilBERT CLS embeddings + LogisticRegression\n"
+        f"data: {source}\n"
         f"model: distilbert-base-uncased (frozen)\n"
         f"n_samples: {len(y)}\n"
-        f"train/test: 80/20, stratify=y, random_state=42\n"
-        f"classifier: LogisticRegression(max_iter=1000, n_jobs=-1)\n\n"
+        f"train/test: 80/20, stratify=y, random_state={RANDOM_STATE}\n"
+        f"classifier: LogisticRegression(max_iter=1000, n_jobs=-1)\n"
+        f"artifact: {BASELINE_PKL.name}\n\n"
         f"{report}\n"
         f"macro F1: {f1:.4f}\n",
         encoding="utf-8",
@@ -134,21 +143,26 @@ def run_baseline(max_samples: int | None = None, batch_size: int = 32) -> float:
 
 
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Transformer-free baseline on IMDB")
+    parser = argparse.ArgumentParser(description="Baseline: CLS + LogisticRegression")
     parser.add_argument(
-        "--max-samples",
-        type=int,
+        "--data",
+        type=str,
         default=None,
-        help="Optional subset size (default: full 50K). Useful for a quick CPU smoke test.",
+        help="CSV path (text,label or review,sentiment). Default: data/dataset.csv or IMDB.",
     )
+    parser.add_argument("--max-samples", type=int, default=None)
+    parser.add_argument("--fraction", type=float, default=DEFAULT_FRACTION)
     parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--skip-demo", action="store_true", help="Skip tasks 1–2 demos")
+    parser.add_argument("--skip-demo", action="store_true")
     args = parser.parse_args()
 
     if not args.skip_demo:
         demo_tokenization()
         demo_cls_embeddings()
 
-    run_baseline(max_samples=args.max_samples, batch_size=args.batch_size)
+    run_baseline(
+        data_path=args.data,
+        max_samples=args.max_samples,
+        fraction=args.fraction,
+        batch_size=args.batch_size,
+    )

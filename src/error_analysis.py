@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import pandas as pd
+import torch
 from sklearn.model_selection import train_test_split
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
-import torch
 
-from src.compare import FRACTION, RANDOM_STATE, load_imdb_subset
+from src.data_loading import (
+    DEFAULT_FRACTION,
+    RANDOM_STATE,
+    load_sentiment_csv,
+    subsample_stratified,
+)
 from src.predict import LABEL_NAMES, predict_fine_tuned
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,6 +24,12 @@ OUT_PATH = ROOT / "error_analysis.txt"
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="FP/FN error analysis")
+    parser.add_argument("--data", type=str, default=None)
+    parser.add_argument("--fraction", type=float, default=DEFAULT_FRACTION)
+    parser.add_argument("--max-samples", type=int, default=None)
+    args = parser.parse_args()
+
     if not FT_DIR.exists():
         raise FileNotFoundError(f"Missing fine-tuned model: {FT_DIR}")
 
@@ -27,7 +39,9 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
-    df = load_imdb_subset(FRACTION)
+    df = load_sentiment_csv(args.data)
+    source = df.attrs.get("source_path", args.data)
+    df = subsample_stratified(df, fraction=args.fraction, max_samples=args.max_samples)
     _, test_df = train_test_split(
         df, test_size=0.2, random_state=RANDOM_STATE, stratify=df["label"]
     )
@@ -60,9 +74,8 @@ def main() -> None:
     for _, row in fp.head(5).iterrows():
         print(f"\nТекст: {row['text'][:100]}...", flush=True)
         print(
-            f"Истинный класс: {row['true_label']} ({LABEL_NAMES[row['true_label']]}), "
-            f"Предсказан: {row['pred_label']} ({LABEL_NAMES[row['pred_label']]}), "
-            f"conf={row['confidence']:.3f}",
+            f"Истинный класс: {row['true_label']} ({LABEL_NAMES.get(row['true_label'], row['true_label'])}), "
+            f"Предсказан: {row['pred_label']} ({LABEL_NAMES.get(row['pred_label'], row['pred_label'])})",
             flush=True,
         )
 
@@ -70,19 +83,17 @@ def main() -> None:
     for _, row in fn.head(5).iterrows():
         print(f"\nТекст: {row['text'][:100]}...", flush=True)
         print(
-            f"Истинный класс: {row['true_label']} ({LABEL_NAMES[row['true_label']]}), "
-            f"Предсказан: {row['pred_label']} ({LABEL_NAMES[row['pred_label']]}), "
-            f"conf={row['confidence']:.3f}",
+            f"Истинный класс: {row['true_label']} ({LABEL_NAMES.get(row['true_label'], row['true_label'])}), "
+            f"Предсказан: {row['pred_label']} ({LABEL_NAMES.get(row['pred_label'], row['pred_label'])})",
             flush=True,
         )
 
     errors["text_length"] = errors["text"].str.len()
-    mean_err_len = errors["text_length"].mean() if len(errors) else 0.0
-    mean_all_len = df_test["text"].str.len().mean()
+    mean_err_len = float(errors["text_length"].mean()) if len(errors) else 0.0
+    mean_all_len = float(df_test["text"].str.len().mean())
     print(f"\nСредняя длина ошибочных текстов: {mean_err_len:.0f}", flush=True)
     print(f"Средняя длина всех текстов: {mean_all_len:.0f}", flush=True)
 
-    # Heuristic observations from counts / length / confidence
     mean_fp_conf = float(fp["confidence"].mean()) if len(fp) else 0.0
     mean_fn_conf = float(fn["confidence"].mean()) if len(fn) else 0.0
     mean_ok_conf = float(
@@ -90,35 +101,18 @@ def main() -> None:
     )
 
     observations = [
-        f"Ошибки составляют {100 * len(errors) / len(df_test):.1f}% тестовой выборки "
-        f"({len(errors)}/{len(df_test)}).",
-        f"FP={len(fp)}, FN={len(fn)} — баланс ошибок "
-        + (
-            "примерно равный."
-            if abs(len(fp) - len(fn)) <= max(5, 0.15 * len(errors))
-            else ("смещён в сторону FP (ложный positive)." if len(fp) > len(fn) else "смещён в сторону FN (ложный negative).")
-        ),
-        f"Средняя длина ошибок ({mean_err_len:.0f}) vs всех текстов ({mean_all_len:.0f}). "
-        + (
-            "Ошибки чаще на более длинных отзывах — модель хуже держит смешанный/саркастичный контекст при max_length=128."
-            if mean_err_len > mean_all_len * 1.05
-            else (
-                "Ошибки чаще на более коротких текстах — мало сигнала для CLS."
-                if mean_err_len < mean_all_len * 0.95
-                else "Длина ошибочных и корректных текстов сопоставима."
-            )
-        ),
-        f"Средняя уверенность на ошибках: FP={mean_fp_conf:.3f}, FN={mean_fn_conf:.3f}; "
-        f"на верных предсказаниях: {mean_ok_conf:.3f}.",
-        "Типичные паттерны IMDB: ирония/сарказм, смешанные отзывы (хвалит актёров, ругает сюжет), "
-        "spoiler-heavy тексты и HTML-артефакты (<br />) в исходных данных.",
-        "Ограничение max_length=128 обрезает длинные рецензии — важный вердикт может оказаться за окном.",
+        f"Ошибки: {100 * len(errors) / max(len(df_test), 1):.1f}% теста ({len(errors)}/{len(df_test)}).",
+        f"FP={len(fp)}, FN={len(fn)}.",
+        f"Средняя длина ошибок ({mean_err_len:.0f}) vs всех ({mean_all_len:.0f}).",
+        f"Уверенность: FP={mean_fp_conf:.3f}, FN={mean_fn_conf:.3f}, correct={mean_ok_conf:.3f}.",
+        "Частые паттерны: ирония/смешанные отзывы, обрезка max_length=128, HTML (<br />) в IMDB.",
     ]
 
     lines: list[str] = [
         "=== АНАЛИЗ ОШИБОК ===\n",
         f"model: {FT_DIR}",
-        f"data: IMDB {FRACTION:.0%} subset, test_size=0.2, random_state={RANDOM_STATE}",
+        f"data: {source}",
+        f"subset fraction={args.fraction}, max_samples={args.max_samples}, random_state={RANDOM_STATE}",
         f"n_test: {len(df_test)}\n",
         f"Всего ошибок: {len(errors)}",
         f"False Positives: {len(fp)}",
@@ -131,8 +125,7 @@ def main() -> None:
     for _, row in fp.head(5).iterrows():
         lines.append(f"Текст: {row['text']}")
         lines.append(
-            f"Истинный: {row['true_label']} ({LABEL_NAMES[int(row['true_label'])]}), "
-            f"Предсказан: {row['pred_label']} ({LABEL_NAMES[int(row['pred_label'])]}), "
+            f"Истинный: {row['true_label']}, Предсказан: {row['pred_label']}, "
             f"confidence={row['confidence']:.4f}\n"
         )
 
@@ -140,8 +133,7 @@ def main() -> None:
     for _, row in fn.head(5).iterrows():
         lines.append(f"Текст: {row['text']}")
         lines.append(
-            f"Истинный: {row['true_label']} ({LABEL_NAMES[int(row['true_label'])]}), "
-            f"Предсказан: {row['pred_label']} ({LABEL_NAMES[int(row['pred_label'])]}), "
+            f"Истинный: {row['true_label']}, Предсказан: {row['pred_label']}, "
             f"confidence={row['confidence']:.4f}\n"
         )
 
