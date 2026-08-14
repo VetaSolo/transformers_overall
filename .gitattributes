@@ -1,0 +1,3 @@
+fine_tuned_model/*.safetensors filter=lfs diff=lfs merge=lfs -text
+fine_tuned_model/*.bin filter=lfs diff=lfs merge=lfs -text
+fine_tuned_model/*.msgpack filter=lfs diff=lfs merge=lfs -text

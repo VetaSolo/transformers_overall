@@ -26,6 +26,7 @@ from src.data_loading import (
     load_sentiment_csv,
     subsample_stratified,
 )
+from src.model_io import assert_finetuned_model_ready
 from src.predict import LABEL_NAMES, format_probs, predict_baseline, predict_fine_tuned
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -81,6 +82,7 @@ def main() -> None:
     if not FT_DIR.exists():
         raise FileNotFoundError(f"Fine-tuned model not found: {FT_DIR}. Run: python -m src.finetune")
 
+    assert_finetuned_model_ready(FT_DIR)
     model_ft = AutoModelForSequenceClassification.from_pretrained(FT_DIR)
     tokenizer = AutoTokenizer.from_pretrained(FT_DIR)
     model_ft.eval()

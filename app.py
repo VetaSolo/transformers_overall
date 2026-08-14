@@ -15,10 +15,9 @@ MODEL_DIR = ROOT / "fine_tuned_model"
 # Binary IMDB labels (not 3-class)
 LABEL_MAP = {0: "Negative", 1: "Positive"}
 
-if not MODEL_DIR.exists():
-    raise FileNotFoundError(
-        f"Fine-tuned model not found at {MODEL_DIR}. Run: python -m src.finetune"
-    )
+from src.model_io import assert_finetuned_model_ready
+
+assert_finetuned_model_ready(MODEL_DIR)
 
 tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR)
 model = AutoModelForSequenceClassification.from_pretrained(MODEL_DIR)

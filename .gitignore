@@ -10,19 +10,11 @@ Thumbs.db
 .env
 *.log
 
-# Large raw data & embedding caches (metrics/artifacts below ARE tracked)
+# Large raw data & embedding caches
 data/*
 !data/.gitkeep
 !data/sample_assignment.csv
 *.npy
 
-# Model weights are large; keep locally after Day 5 (python -m src.finetune)
-fine_tuned_model/*.safetensors
-fine_tuned_model/*.bin
-# keep tokenizer/config if present
-!fine_tuned_model/config.json
-!fine_tuned_model/tokenizer*.json
-
-# Plots can be regenerated
+# Attention debug plots (optional); confusion matrices ARE tracked for Day 6
 attention_layer*.png
-confusion_matrix_*.png

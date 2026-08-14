@@ -61,10 +61,14 @@ def test_predict_empty_rejected():
 
 
 def test_missing_model_returns_503(monkeypatch, tmp_path):
-    """API must not fall back to heuristic stub."""
+    """API must not report ok without loadable weights."""
     import src.main as main_mod
 
-    monkeypatch.setattr(main_mod, "MODEL_DIR", tmp_path / "missing_model")
+    empty = tmp_path / "fine_tuned_model"
+    empty.mkdir()
+    (empty / "config.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(main_mod, "MODEL_DIR", empty)
     main_mod._model = None
     main_mod._tokenizer = None
     c = TestClient(main_mod.app)
@@ -72,3 +76,15 @@ def test_missing_model_returns_503(monkeypatch, tmp_path):
     assert response.status_code == 503
     response = c.post("/predict", json={"text": "hello great"})
     assert response.status_code == 503
+
+
+def test_root_rejects_dir_without_weights(monkeypatch, tmp_path):
+    import src.main as main_mod
+
+    bare = tmp_path / "fine_tuned_model"
+    bare.mkdir()
+    (bare / "tokenizer_config.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(main_mod, "MODEL_DIR", bare)
+    main_mod._model = None
+    main_mod._tokenizer = None
+    assert TestClient(main_mod.app).get("/").status_code == 503

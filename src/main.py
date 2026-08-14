@@ -9,35 +9,41 @@ import torch.nn.functional as F
 from fastapi import FastAPI, HTTPException
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
+from src.model_io import assert_finetuned_model_ready, model_weight_files
 from src.models import PredictRequest, PredictResponse
 
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_DIR = ROOT / "fine_tuned_model"
 LABEL_MAP = {0: "negative", 1: "positive", 2: "neutral"}
 
-app = FastAPI(title="Sentiment API", version="0.3.0")
+app = FastAPI(title="Sentiment API", version="0.3.1")
 
 _tokenizer = None
 _model = None
 _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+def _model_unavailable(exc: Exception) -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail=f"{exc}. Run: python -m src.finetune",
+    )
+
+
 def _load_model() -> None:
     global _tokenizer, _model
     if _model is not None:
         return
-    if not MODEL_DIR.exists():
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                f"Fine-tuned model not found at {MODEL_DIR}. "
-                "Run: python -m src.finetune"
-            ),
-        )
-    _tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR)
-    _model = AutoModelForSequenceClassification.from_pretrained(MODEL_DIR)
-    _model.eval()
-    _model.to(_device)
+    try:
+        assert_finetuned_model_ready(MODEL_DIR)
+        _tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR)
+        _model = AutoModelForSequenceClassification.from_pretrained(MODEL_DIR)
+        _model.eval()
+        _model.to(_device)
+    except Exception as exc:  # noqa: BLE001 — surface as 503 for API clients
+        _tokenizer = None
+        _model = None
+        raise _model_unavailable(exc) from exc
 
 
 def predict_with_finetuned(text: str) -> tuple[str, float]:
@@ -55,17 +61,23 @@ def predict_with_finetuned(text: str) -> tuple[str, float]:
 
 
 @app.get("/")
-def root() -> dict[str, str]:
-    if not MODEL_DIR.exists():
-        raise HTTPException(
-            status_code=503,
-            detail=f"Fine-tuned model missing: {MODEL_DIR}. Run python -m src.finetune",
-        )
+def root() -> dict:
+    """Health-check: directory AND weight files must exist; model must load."""
+    try:
+        weight = assert_finetuned_model_ready(MODEL_DIR)
+        _load_model()
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise _model_unavailable(exc) from exc
+
     return {
         "status": "ok",
         "message": "Sentiment API is running",
         "backend": "fine_tuned",
         "model_dir": str(MODEL_DIR),
+        "weights": weight.name,
+        "weight_files": [p.name for p in model_weight_files(MODEL_DIR)],
     }
 
 
