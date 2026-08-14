@@ -90,6 +90,15 @@ uvicorn src.main:app --reload
 
 Улучшение F1: **+5.01%**
 
+Веса модели: `fine_tuned_model/model.safetensors` (в git через **Git LFS**).  
+Confusion matrices: `confusion_matrix_finetuned.png`, `confusion_matrix_baseline.png`.
+
+После клона:
+```bash
+git lfs install
+git lfs pull
+```
+
 ## Использование в коде
 
 ```python
