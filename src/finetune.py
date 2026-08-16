@@ -5,11 +5,11 @@ Day 5 — Fine-tuning DistilBERT for sentiment classification.
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import torch
 from sklearn.metrics import accuracy_score, f1_score
-from sklearn.model_selection import train_test_split
 from torch.optim import AdamW  # transformers.AdamW removed in recent versions
 from torch.utils.data import DataLoader
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
@@ -17,14 +17,17 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 from src.data_loading import (
     DEFAULT_FRACTION,
     RANDOM_STATE,
-    load_sentiment_csv,
-    subsample_stratified,
+    TEST_SIZE,
+    data_manifest,
+    make_split,
+    prepare_dataset,
 )
 from src.dataset import SentimentDataset
 
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_DIR = ROOT / "fine_tuned_model"
 RESULTS_PATH = ROOT / "fine_tuned_results.txt"
+MANIFEST_PATH = ROOT / "fine_tuned_model.json"
 MODEL_NAME = "distilbert-base-uncased"
 
 
@@ -117,18 +120,22 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    df = load_sentiment_csv(args.data)
+    df = prepare_dataset(args.data, fraction=args.fraction, max_samples=args.max_samples)
     source = df.attrs.get("source_path", args.data)
-    n_full = len(df)
-    df = subsample_stratified(df, fraction=args.fraction, max_samples=args.max_samples)
-    texts = df["text"].tolist()
     labels = df["label"].tolist()
-    print(f"Loaded: {source}")
-    print(f"Using subset: {len(texts)} / {n_full} samples")
 
-    train_texts, val_texts, train_labels, val_labels = train_test_split(
-        texts, labels, test_size=0.2, random_state=RANDOM_STATE, stratify=labels
+    train_df, val_df = make_split(df)
+    manifest = data_manifest(
+        df, val_df, fraction=args.fraction, max_samples=args.max_samples
     )
+    train_texts = train_df["text"].tolist()
+    train_labels = train_df["label"].tolist()
+    val_texts = val_df["text"].tolist()
+    val_labels = val_df["label"].tolist()
+
+    print(f"Loaded: {source}")
+    print(f"Using subset: {len(df)} / {manifest['n_full']} samples")
+    print(f"Split fingerprint: {manifest['split_fingerprint']}")
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
     train_dataset = SentimentDataset(train_texts, train_labels, tokenizer, max_length=args.max_length)
@@ -170,13 +177,17 @@ def main() -> None:
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     model.save_pretrained(MODEL_DIR)
     tokenizer.save_pretrained(MODEL_DIR)
+    MANIFEST_PATH.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     RESULTS_PATH.write_text(
         f"model: {MODEL_NAME}\n"
         f"data: {source}\n"
-        f"n_samples: {len(texts)} (of {n_full})\n"
+        f"n_samples: {len(df)} (of {manifest['n_full']})\n"
         f"fraction/max_samples: fraction={args.fraction}, max_samples={args.max_samples}\n"
-        f"train/val: 80/20, stratify, random_state={RANDOM_STATE}\n"
+        f"train/val: {1 - TEST_SIZE:.0%}/{TEST_SIZE:.0%}, stratify, "
+        f"random_state={RANDOM_STATE}\n"
+        f"train={len(train_texts)}, val={len(val_texts)}\n"
+        f"split_fingerprint: {manifest['split_fingerprint']}\n"
         f"epochs: {args.epochs}\n"
         f"batch_size: {args.batch_size}\n"
         f"lr: {args.lr}\n"

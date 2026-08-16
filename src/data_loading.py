@@ -7,10 +7,12 @@ Accepted schemas:
 
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 
 import pandas as pd
+from sklearn.model_selection import train_test_split
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
@@ -21,6 +23,7 @@ DEFAULT_CANDIDATES = (
 
 RANDOM_STATE = 42
 DEFAULT_FRACTION = 0.25
+TEST_SIZE = 0.2
 
 
 def resolve_data_path(path: str | Path | None = None) -> Path:
@@ -128,3 +131,76 @@ def subsample_stratified(
         .sample(frac=1.0, random_state=random_state)
         .reset_index(drop=True)
     )
+
+
+def prepare_dataset(
+    path: str | Path | None = None,
+    fraction: float | None = DEFAULT_FRACTION,
+    max_samples: int | None = None,
+    random_state: int = RANDOM_STATE,
+) -> pd.DataFrame:
+    df = load_sentiment_csv(path)
+    source = df.attrs.get("source_path")
+    n_full = len(df)
+    df = subsample_stratified(
+        df, fraction=fraction, max_samples=max_samples, random_state=random_state
+    )
+    df.attrs["source_path"] = source
+    df.attrs["n_full"] = n_full
+    return df
+
+
+def make_split(
+    df: pd.DataFrame,
+    test_size: float = TEST_SIZE,
+    random_state: int = RANDOM_STATE,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """The single train/test split shared by days 4, 5, 6 and 7.
+
+    Every day must derive its data through prepare_dataset + make_split so the
+    baseline never sees fine-tuning test examples during training.
+    """
+    train_df, test_df = train_test_split(
+        df,
+        test_size=test_size,
+        random_state=random_state,
+        stratify=df["label"],
+    )
+    return train_df.reset_index(drop=True), test_df.reset_index(drop=True)
+
+
+def split_fingerprint(test_df: pd.DataFrame) -> str:
+    """Stable hash of the test split, used to detect incompatible artifacts."""
+    digest = hashlib.sha256()
+    for text, label in zip(test_df["text"], test_df["label"]):
+        digest.update(str(label).encode("utf-8"))
+        digest.update(b"\x00")
+        digest.update(text.encode("utf-8", errors="replace"))
+        digest.update(b"\x01")
+    return digest.hexdigest()[:16]
+
+
+def data_manifest(
+    df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    fraction: float | None,
+    max_samples: int | None,
+    random_state: int = RANDOM_STATE,
+    test_size: float = TEST_SIZE,
+) -> dict:
+    source = str(df.attrs.get("source_path", ""))
+    try:
+        source = str(Path(source).resolve().relative_to(ROOT.resolve()))
+    except (ValueError, OSError):
+        pass
+    return {
+        "source_path": source,
+        "n_full": int(df.attrs.get("n_full", len(df))),
+        "n_used": int(len(df)),
+        "n_test": int(len(test_df)),
+        "fraction": fraction,
+        "max_samples": max_samples,
+        "random_state": random_state,
+        "test_size": test_size,
+        "split_fingerprint": split_fingerprint(test_df),
+    }

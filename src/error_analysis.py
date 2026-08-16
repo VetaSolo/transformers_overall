@@ -7,14 +7,14 @@ from pathlib import Path
 
 import pandas as pd
 import torch
-from sklearn.model_selection import train_test_split
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from src.data_loading import (
     DEFAULT_FRACTION,
     RANDOM_STATE,
-    load_sentiment_csv,
-    subsample_stratified,
+    data_manifest,
+    make_split,
+    prepare_dataset,
 )
 from src.model_io import assert_finetuned_model_ready
 from src.predict import LABEL_NAMES, predict_fine_tuned
@@ -41,11 +41,11 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
-    df = load_sentiment_csv(args.data)
+    df = prepare_dataset(args.data, fraction=args.fraction, max_samples=args.max_samples)
     source = df.attrs.get("source_path", args.data)
-    df = subsample_stratified(df, fraction=args.fraction, max_samples=args.max_samples)
-    _, test_df = train_test_split(
-        df, test_size=0.2, random_state=RANDOM_STATE, stratify=df["label"]
+    _, test_df = make_split(df)
+    manifest = data_manifest(
+        df, test_df, fraction=args.fraction, max_samples=args.max_samples
     )
     test_texts = test_df["text"].tolist()
     test_labels = test_df["label"].tolist()
@@ -115,6 +115,7 @@ def main() -> None:
         f"model: {FT_DIR}",
         f"data: {source}",
         f"subset fraction={args.fraction}, max_samples={args.max_samples}, random_state={RANDOM_STATE}",
+        f"split_fingerprint: {manifest['split_fingerprint']}",
         f"n_test: {len(df_test)}\n",
         f"Всего ошибок: {len(errors)}",
         f"False Positives: {len(fp)}",

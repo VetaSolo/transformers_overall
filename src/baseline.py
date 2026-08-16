@@ -2,33 +2,36 @@
 Day 4 — Baseline without fine-tuning the transformer.
 
 CLS embeddings (frozen DistilBERT) + LogisticRegression.
-Saves baseline_model.pkl for Day 6 comparison.
+Saves baseline_model.pkl (+ manifest) so Day 6 can reuse this exact model on a
+test split the baseline has never been trained on.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import joblib
 import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report, f1_score
-from sklearn.model_selection import train_test_split
 
 from src.data_loading import (
     DEFAULT_FRACTION,
     RANDOM_STATE,
-    load_sentiment_csv,
-    subsample_stratified,
+    TEST_SIZE,
+    data_manifest,
+    make_split,
+    prepare_dataset,
 )
 from src.embeddings import get_cls_embeddings, tokenize_texts
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS_PATH = ROOT / "baseline_results.txt"
 BASELINE_PKL = ROOT / "baseline_model.pkl"
-EMBEDDINGS_CACHE = ROOT / "data" / "cls_embeddings.npy"
-LABELS_CACHE = ROOT / "data" / "cls_labels.npy"
+BASELINE_MANIFEST = ROOT / "baseline_model.json"
+CACHE_DIR = ROOT / "data"
 
 
 def demo_tokenization() -> None:
@@ -66,6 +69,20 @@ def demo_cls_embeddings() -> None:
     print()
 
 
+def _embed_cached(texts: list[str], name: str, fingerprint: str, batch_size: int) -> np.ndarray:
+    cache = CACHE_DIR / f"cls_{name}_{fingerprint}.npy"
+    if cache.exists():
+        cached = np.load(cache)
+        if cached.shape[0] == len(texts):
+            print(f"Loading cached embeddings: {cache.name}", flush=True)
+            return cached
+    print(f"Extracting CLS embeddings for {name} ({len(texts)} texts)...", flush=True)
+    emb = get_cls_embeddings(texts, batch_size=batch_size)
+    np.save(cache, emb)
+    print(f"Saved cache -> {cache.name}", flush=True)
+    return emb
+
+
 def run_baseline(
     data_path: str | None = None,
     max_samples: int | None = None,
@@ -76,41 +93,22 @@ def run_baseline(
     print("ЗАДАЧА 3: Logistic Regression на эмбеддингах")
     print("=" * 60)
 
-    df = load_sentiment_csv(data_path)
+    df = prepare_dataset(data_path, fraction=fraction, max_samples=max_samples)
     source = df.attrs.get("source_path", data_path)
-    print(f"Loaded: {source} ({len(df)} rows)")
+    train_df, test_df = make_split(df)
+    manifest = data_manifest(df, test_df, fraction=fraction, max_samples=max_samples)
 
-    df = subsample_stratified(df, fraction=fraction, max_samples=max_samples)
-    print(f"Using: {len(df)} rows for baseline")
+    print(f"Loaded: {source} ({manifest['n_full']} rows)")
+    print(f"Using: {len(df)} rows | train={len(train_df)} test={len(test_df)}")
+    print(f"Split fingerprint: {manifest['split_fingerprint']}")
 
-    texts = df["text"].tolist()
-    y = df["label"].to_numpy()
+    fp = manifest["split_fingerprint"]
+    X_train = _embed_cached(train_df["text"].tolist(), "train", fp, batch_size)
+    X_test = _embed_cached(test_df["text"].tolist(), "test", fp, batch_size)
+    y_train = train_df["label"].to_numpy()
+    y_test = test_df["label"].to_numpy()
 
-    cache_ok = (
-        max_samples is None
-        and fraction == DEFAULT_FRACTION
-        and EMBEDDINGS_CACHE.exists()
-        and LABELS_CACHE.exists()
-        and np.load(LABELS_CACHE).shape[0] == len(texts)
-    )
-
-    if cache_ok:
-        print(f"Loading cached embeddings: {EMBEDDINGS_CACHE}")
-        X = np.load(EMBEDDINGS_CACHE)
-        y = np.load(LABELS_CACHE)
-    else:
-        print(f"Extracting CLS embeddings (batch_size={batch_size})...")
-        X = get_cls_embeddings(texts, batch_size=batch_size)
-        if max_samples is None and fraction == DEFAULT_FRACTION:
-            np.save(EMBEDDINGS_CACHE, X)
-            np.save(LABELS_CACHE, y)
-            print(f"Saved embeddings cache -> {EMBEDDINGS_CACHE}")
-
-    print(f"X shape: {X.shape}, y shape: {y.shape}")
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, stratify=y, random_state=RANDOM_STATE
-    )
+    print(f"X_train: {X_train.shape} | X_test: {X_test.shape}")
 
     clf = LogisticRegression(max_iter=1000, n_jobs=-1)
     clf.fit(X_train, y_train)
@@ -118,7 +116,9 @@ def run_baseline(
 
     # Day 6 must load THIS model — not retrain inside compare.py
     joblib.dump(clf, BASELINE_PKL)
+    BASELINE_MANIFEST.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(f"Saved baseline model -> {BASELINE_PKL}")
+    print(f"Saved manifest -> {BASELINE_MANIFEST}")
 
     report = classification_report(y_test, y_pred)
     f1 = f1_score(y_test, y_pred, average="macro")
@@ -130,10 +130,14 @@ def run_baseline(
         "Baseline: DistilBERT CLS embeddings + LogisticRegression\n"
         f"data: {source}\n"
         f"model: distilbert-base-uncased (frozen)\n"
-        f"n_samples: {len(y)}\n"
-        f"train/test: 80/20, stratify=y, random_state={RANDOM_STATE}\n"
+        f"n_samples: {len(df)} (of {manifest['n_full']}), "
+        f"fraction={fraction}, max_samples={max_samples}\n"
+        f"train/test: {1 - TEST_SIZE:.0%}/{TEST_SIZE:.0%}, stratify, "
+        f"random_state={RANDOM_STATE}\n"
+        f"train={len(train_df)}, test={len(test_df)}\n"
+        f"split_fingerprint: {manifest['split_fingerprint']}\n"
         f"classifier: LogisticRegression(max_iter=1000, n_jobs=-1)\n"
-        f"artifact: {BASELINE_PKL.name}\n\n"
+        f"artifacts: {BASELINE_PKL.name}, {BASELINE_MANIFEST.name}\n\n"
         f"{report}\n"
         f"macro F1: {f1:.4f}\n",
         encoding="utf-8",

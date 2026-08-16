@@ -2,6 +2,7 @@ model: distilbert-base-uncased
 n_samples: 12500 (of full IMDB)
 fraction/max_samples: fraction=0.25, max_samples=None
 train/val: 80/20, stratify, random_state=42
+split_fingerprint: d66df0418f5036ba
 epochs: 3
 batch_size: 16
 lr: 2e-05

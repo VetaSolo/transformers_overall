@@ -1,8 +1,9 @@
 === АНАЛИЗ ОШИБОК ===
 
-model: C:\Users\lizas\OneDrive\Рабочий стол\transformers_overall\fine_tuned_model
-data: IMDB 25% subset, test_size=0.2, random_state=42
+model: ./fine_tuned_model
+data: data/IMDB Dataset.csv
 n_test: 2500
+split_fingerprint: d66df0418f5036ba
 
 Всего ошибок: 341
 False Positives: 180

@@ -1,0 +1,11 @@
+{
+  "source_path": "data/IMDB Dataset.csv",
+  "n_full": 50000,
+  "n_used": 12500,
+  "n_test": 2500,
+  "fraction": 0.25,
+  "max_samples": null,
+  "random_state": 42,
+  "test_size": 0.2,
+  "split_fingerprint": "d66df0418f5036ba"
+}
