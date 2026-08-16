@@ -1,9 +1,12 @@
 === Сравнение моделей ===
 
-data: IMDB 25% subset, test_size=0.2, random_state=42
+data: data/IMDB Dataset.csv
+n_used: 12500 (of 50000), fraction=0.25, max_samples=None
+test_size=0.2, random_state=42
 n_test: 2500
-baseline: frozen DistilBERT CLS + LogisticRegression
-fine-tuned: DistilBERTForSequenceClassification
+split_fingerprint: d66df0418f5036ba (identical for baseline, fine-tuned and this evaluation)
+baseline: Day-4 artifact baseline_model.pkl (frozen DistilBERT CLS + LogisticRegression)
+fine-tuned: ./fine_tuned_model
 
 Fine-tuned Model:
   F1 (macro): 0.8636

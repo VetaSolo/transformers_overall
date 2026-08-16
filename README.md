@@ -90,14 +90,18 @@ uvicorn src.main:app --reload
 
 Улучшение F1: **+5.01%**
 
-Веса модели: `fine_tuned_model/model.safetensors` (в git через **Git LFS**).  
-Confusion matrices: `confusion_matrix_finetuned.png`, `confusion_matrix_baseline.png`.
+Веса модели: `fine_tuned_model/model.safetensors` (~268 MB, **Git LFS**).  
+В git хранится pointer (~130 байт); без `git lfs pull` файл не является чекпоинтом, и `from_pretrained` падает. `GET /` и `assert_finetuned_model_ready` это ловят (не `ok`).
+
+Confusion matrices: `confusion_matrix_finetuned.png`, `confusion_matrix_baseline.png`.  
+Сравнение baseline vs fine-tuned — на **одном** 25% split (`split_fingerprint: d66df0418f5036ba`, test=2500). Baseline больше не учится на полных 50K.
 
 После клона:
 ```bash
 git lfs install
 git lfs pull
 ```
+Если pull недоступен: `python -m src.finetune` (пересоздаст веса локально).
 
 ## Использование в коде
 
