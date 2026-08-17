@@ -1,3 +1,3 @@
-fine_tuned_model/*.safetensors filter=lfs diff=lfs merge=lfs -text
-fine_tuned_model/*.bin filter=lfs diff=lfs merge=lfs -text
-fine_tuned_model/*.msgpack filter=lfs diff=lfs merge=lfs -text
+# Weights are stored as regular git files, sharded below GitHub's 100MB limit.
+# Do not track them with Git LFS — clones without `git lfs pull` would get
+# an unusable pointer instead of a real checkpoint.

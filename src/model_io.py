@@ -78,18 +78,18 @@ def validate_weight_file(path: Path) -> None:
     if is_lfs_pointer(path):
         raise InvalidModelWeights(
             f"{path} is a Git LFS pointer, not real weights. "
-            "Fetch them with: git lfs install && git lfs pull "
-            "(or retrain with: python -m src.finetune)"
+            "Run: python -m src.finetune  (or git lfs pull if you use LFS)"
         )
+
+    if path.suffix == ".safetensors" or path.name.endswith(".safetensors"):
+        _validate_safetensors(path)
+        return
 
     size = path.stat().st_size
     if size < MIN_WEIGHT_BYTES:
         raise InvalidModelWeights(
             f"{path} is only {size} bytes — too small to be a checkpoint."
         )
-
-    if path.suffix == ".safetensors":
-        _validate_safetensors(path)
 
 
 def assert_finetuned_model_ready(model_dir: Path) -> Path:

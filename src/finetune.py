@@ -175,7 +175,7 @@ def main() -> None:
         history.append(line)
 
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    model.save_pretrained(MODEL_DIR)
+    model.save_pretrained(MODEL_DIR, max_shard_size="80MB")
     tokenizer.save_pretrained(MODEL_DIR)
     MANIFEST_PATH.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 

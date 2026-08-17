@@ -24,6 +24,10 @@ DEFAULT_CANDIDATES = (
 RANDOM_STATE = 42
 DEFAULT_FRACTION = 0.25
 TEST_SIZE = 0.2
+# Default 25% subsample is only for large corpora (IMDB). Tiny CSVs like
+# data/sample_assignment.csv must be kept whole so stratify still works.
+MIN_ROWS_TO_SUBSAMPLE = 50
+MIN_PER_CLASS = 2
 
 
 def resolve_data_path(path: str | Path | None = None) -> Path:
@@ -109,28 +113,39 @@ def subsample_stratified(
     max_samples: int | None = None,
     random_state: int = RANDOM_STATE,
 ) -> pd.DataFrame:
-    """Optional stratified subset (used to speed up CPU fine-tuning)."""
+    """Optional stratified subset (used to speed up CPU fine-tuning).
+
+    Small datasets are never shrunk: 6-row ``sample_assignment.csv`` with the
+    default fraction=0.25 would otherwise become 2 rows and break ``stratify``.
+    """
     n_full = len(df)
+    n_classes = max(int(df["label"].nunique()), 1)
+
     if max_samples is not None:
         target_n = min(max_samples, n_full)
     elif fraction is None or fraction >= 1.0:
         return df.reset_index(drop=True)
+    elif n_full < MIN_ROWS_TO_SUBSAMPLE:
+        return df.reset_index(drop=True)
     else:
-        target_n = max(2, int(n_full * fraction))
+        target_n = max(n_classes * MIN_PER_CLASS, int(n_full * fraction))
 
     if target_n >= n_full:
         return df.reset_index(drop=True)
 
-    n_per = max(1, target_n // 2)
+    n_per = max(MIN_PER_CLASS, target_n // n_classes)
     parts = [
         g.sample(n=min(len(g), n_per), random_state=random_state)
         for _, g in df.groupby("label")
     ]
-    return (
+    out = (
         pd.concat(parts)
         .sample(frac=1.0, random_state=random_state)
         .reset_index(drop=True)
     )
+    if int(out["label"].value_counts().min()) < MIN_PER_CLASS:
+        return df.reset_index(drop=True)
+    return out
 
 
 def prepare_dataset(
@@ -160,12 +175,38 @@ def make_split(
     Every day must derive its data through prepare_dataset + make_split so the
     baseline never sees fine-tuning test examples during training.
     """
-    train_df, test_df = train_test_split(
-        df,
-        test_size=test_size,
-        random_state=random_state,
-        stratify=df["label"],
-    )
+    n = len(df)
+    if n < 2:
+        raise ValueError(f"Need at least 2 rows to split, got {n}")
+
+    n_classes = int(df["label"].nunique())
+    min_count = int(df["label"].value_counts().min())
+    can_stratify = min_count >= MIN_PER_CLASS
+
+    n_test = max(1, int(round(n * test_size)))
+    if can_stratify:
+        n_test = max(n_test, n_classes)
+        n_test = min(n_test, n - n_classes)
+        if n_test < n_classes:
+            n_test = max(n_classes, min(n // 2, n - n_classes))
+    else:
+        n_test = min(n_test, n - 1)
+
+    stratify = df["label"] if can_stratify else None
+    try:
+        train_df, test_df = train_test_split(
+            df,
+            test_size=n_test,
+            random_state=random_state,
+            stratify=stratify,
+        )
+    except ValueError:
+        train_df, test_df = train_test_split(
+            df,
+            test_size=max(1, min(n_test, n - 1)),
+            random_state=random_state,
+            stratify=None,
+        )
     return train_df.reset_index(drop=True), test_df.reset_index(drop=True)
 
 
