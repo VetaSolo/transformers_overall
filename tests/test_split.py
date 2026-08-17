@@ -8,6 +8,19 @@ from src.compare import load_baseline_from_day4
 from src.data_loading import make_split, split_fingerprint
 
 
+def test_sample_assignment_csv_survives_default_fraction():
+    """README: python -m src.baseline --data data/sample_assignment.csv"""
+    from src.data_loading import prepare_dataset
+
+    df = prepare_dataset("data/sample_assignment.csv")
+    assert len(df) == 6
+    assert int(df["label"].value_counts().min()) >= 2
+    train_df, test_df = make_split(df)
+    assert len(train_df) >= 2
+    assert len(test_df) >= 2
+    assert set(train_df["label"]) and set(test_df["label"])
+
+
 def test_split_fingerprint_is_stable():
     texts, labels = [], []
     for i in range(20):

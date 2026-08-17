@@ -51,7 +51,8 @@ pip install -r requirements.txt
 
 # Day 4 — baseline (пишет baseline_results.txt + baseline_model.pkl)
 python -m src.baseline --data data/sample_assignment.csv
-# или на IMDB (25% по умолчанию):
+# маленький CSV не режется 25% — все 6 строк остаются, split не падает
+# или на IMDB (25% по умолчанию, только если строк >= 50):
 python -m src.baseline
 
 # Day 5 — fine-tuning
@@ -90,18 +91,12 @@ uvicorn src.main:app --reload
 
 Улучшение F1: **+5.01%**
 
-Веса модели: `fine_tuned_model/model.safetensors` (~268 MB, **Git LFS**).  
-В git хранится pointer (~130 байт); без `git lfs pull` файл не является чекпоинтом, и `from_pretrained` падает. `GET /` и `assert_finetuned_model_ready` это ловят (не `ok`).
+Веса модели лежат в `fine_tuned_model/` **обычными git-файлами**, шардами < 100 MB:
+`model-00001-of-00004.safetensors` … `model-00004-of-00004.safetensors` + `model.safetensors.index.json`.
+Git LFS **не используется**: клон сразу получает настоящий чекпоинт, `from_pretrained("./fine_tuned_model")` работает без `git lfs pull`.
 
 Confusion matrices: `confusion_matrix_finetuned.png`, `confusion_matrix_baseline.png`.  
-Сравнение baseline vs fine-tuned — на **одном** 25% split (`split_fingerprint: d66df0418f5036ba`, test=2500). Baseline больше не учится на полных 50K.
-
-После клона:
-```bash
-git lfs install
-git lfs pull
-```
-Если pull недоступен: `python -m src.finetune` (пересоздаст веса локально).
+Сравнение baseline vs fine-tuned — на **одном** 25% split (`split_fingerprint: d66df0418f5036ba`, test=2500).
 
 ## Использование в коде
 

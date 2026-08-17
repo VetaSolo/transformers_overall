@@ -1,5 +1,5 @@
 {
-  "source_path": "data/IMDB Dataset.csv",
+  "source_path": "data\\IMDB Dataset.csv",
   "n_full": 50000,
   "n_used": 12500,
   "n_test": 2500,
